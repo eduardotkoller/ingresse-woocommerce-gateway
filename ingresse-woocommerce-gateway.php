@@ -235,63 +235,65 @@ function ingresse_init_cc_gateway_class() {
                     if(isset($response->responseData->data->transactionId)) {
                         $transactionId = $response->responseData->data->transactionId;
                         $order->update_meta_data('ingresse_transactionId', $transactionId);
-                    }
-    
-                    //now we pay this transaction using user cc info
-                    $payUrl = "https://api.ingresse.com/shop/{$transactionId}/payment?apikey={$this->api_key}";
-    
-                    $args = array(
-                        'document' => isset($_POST['billing_cpf']) ? $_POST['billing_cpf'] : $_POST['billing_cnpj'],
-                        'method' => 'creditCard',
-                        'capture' => true,
-                        'softDescriptor' => 'MundoPsicodelico',
-                        'creditCard' => array(
-                            'installments' => 1,
-                            'number' => preg_replace('/[^0-9]/', '', $_POST['ingresse_ccNo']),
-                            'holder' => $_POST['ingresse_ccName'],
-                            'expiration' => $_POST['ingresse_expdate'],
-                            'cvv' => $_POST['ingresse_cvv'],
-                            'brand' => $_POST['ingresse_ccBrand']
-                        ),
-                        'customer' => array(
-                            'name' => $order->get_billing_first_name().' '.$order->get_billing_last_name(),
-                            'address' => array(
-                                'street' => $order->get_billing_address_1(),
-                                'number' => $_POST['billing_number'],
-                                'district' => $_POST['billing_neighborhood'],
-                                'zipcode' => preg_replace('/[^0-9]/', '', $order->get_billing_postcode()),
-                                'city' => $order->get_billing_city(),
-                                'state' => $order->get_billing_state(),
-                                'country' => $order->get_billing_country(),
-                            )
-                        )
-                    );
-    
-                    $data = wp_remote_post($startUrl, array(
-                        'headers'     => array('Content-Type' => 'application/json; charset=utf-8'),
-                        'body'        => json_encode($args),
-                        'method'      => 'POST',
-                        'data_format' => 'body'
-                    )); 
 
-                    if(!is_wp_error($data)) {
-                        $response = json_decode($data['body']);
-                        if(isset($response->responseData->status) && $response->responseData->status=='approved') {
-                            $order->payment_complete($transactionId);
-                            $order->reduce_order_stock();
-                            $woocommerce->cart->empty_cart();
-                            return array(
-                                'result' => 'success',
-                                'redirect' => $this->get_return_url($order)
-                            );
-                        } else if(isset($response->responseData->status) && $response->responseData->status=='authorized') {
-                            // authorized but not captured -- shoudln't happen as we pass capture = true, what to do?
-                            wc_add_notice('Não foi possível realizar a compra no seu cartão de crédito. Verifique se suas informações estão corretas e tente novamente.');
-                            return;
-                        } else {
-                            wc_add_notice('Compra recusada. Verifique suas informações e tente novamente.');
-                            return;
+                        //now we pay this transaction using user cc info
+                        $payUrl = "https://api.ingresse.com/shop/{$transactionId}/payment?apikey={$this->api_key}";
+        
+                        $args = array(
+                            'document' => isset($_POST['billing_cpf']) ? preg_replace('/[^0-9]/', '', $_POST['billing_cpf']) : preg_replace('/[^0-9]/', '', $_POST['billing_cnpj']),
+                            'method' => 'creditCard',
+                            'capture' => true,
+                            'softDescriptor' => 'MundoPsicodelico',
+                            'creditCard' => array(
+                                'installments' => 1,
+                                'number' => preg_replace('/[^0-9]/', '', $_POST['ingresse_ccNo']),
+                                'holder' => $_POST['ingresse_ccName'],
+                                'expiration' => $_POST['ingresse_expdate'],
+                                'cvv' => $_POST['ingresse_cvv'],
+                                'brand' => $_POST['ingresse_ccBrand']
+                            ),
+                            'customer' => array(
+                                'name' => $order->get_billing_first_name().' '.$order->get_billing_last_name(),
+                                'address' => array(
+                                    'street' => $order->get_billing_address_1(),
+                                    'number' => $_POST['billing_number'],
+                                    'district' => $_POST['billing_neighborhood'],
+                                    'zipcode' => preg_replace('/[^0-9]/', '', $order->get_billing_postcode()),
+                                    'city' => $order->get_billing_city(),
+                                    'state' => $order->get_billing_state(),
+                                    'country' => $order->get_billing_country(),
+                                )
+                            )
+                        );
+        
+                        $data = wp_remote_post($startUrl, array(
+                            'headers'     => array('Content-Type' => 'application/json; charset=utf-8'),
+                            'body'        => json_encode($args),
+                            'method'      => 'POST',
+                            'data_format' => 'body'
+                        )); 
+
+                        if(!is_wp_error($data)) {
+                            $response = json_decode($data['body']);
+                            if(isset($response->responseData->status) && $response->responseData->status=='approved') {
+                                $order->payment_complete($transactionId);
+                                $order->reduce_order_stock();
+                                $woocommerce->cart->empty_cart();
+                                return array(
+                                    'result' => 'success',
+                                    'redirect' => $this->get_return_url($order)
+                                );
+                            } else if(isset($response->responseData->status) && $response->responseData->status=='authorized') {
+                                // authorized but not captured -- shoudln't happen as we pass capture = true, what to do?
+                                wc_add_notice('Não foi possível realizar a compra no seu cartão de crédito. Verifique se suas informações estão corretas e tente novamente.');
+                                return;
+                            } else {
+                                wc_add_notice('Compra recusada. Verifique suas informações e tente novamente.');
+                                return;
+                            }
                         }
+                        wc_add_notice('Houve um problema na transação.');
+                        return;
                     }
                     wc_add_notice('Houve um problema na transação.');
                     return;
