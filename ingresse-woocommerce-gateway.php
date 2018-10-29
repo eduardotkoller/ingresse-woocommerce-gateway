@@ -27,6 +27,15 @@ function handle_custom_query_var( $query, $query_vars ) {
 }
 add_filter( 'woocommerce_order_data_store_cpt_get_orders_query', 'handle_custom_query_var', 10, 2 );
 
+function get_payurl_bankbillet($payurl, $order) {
+    $bankbilletUrlPostMeta = get_post_meta($order->get_order_number(), 'bankbillet_url', true);
+    $bankbilletUrl = $order->get_meta('bankbillet_url', true);
+    if($bankbilletUrlPostMeta) return $bankbilletUrlPostMeta;
+    if($bankbilletUrl) return $bankbilletUrl;
+    return $payurl+'&nobillet=true';
+}
+add_filter('woocommerce_get_checkout_payment_url', 'get_payurl_bankbillet', 10, 2);
+
 add_filter( 'woocommerce_payment_gateways', 'ingresse_add_gateway_classes' );
 function ingresse_add_gateway_classes( $gateways ) {
 	$gateways[] = 'WC_Ingresse_CC_Gateway'; //the class name
@@ -224,6 +233,22 @@ function ingresse_init_gateway_classes() {
                     $item['unitPrice'] = $data['total']*100;
                     $items[] = $item;
                 }
+                $shipping_total = $order->get_shipping_total();
+                $shippings = $order->get_items('shipping');
+                if($shipping_total!='0.00') {
+                    foreach($shippings as $shipping) {
+                        $data = $shipping->get_data();
+                        $items[] = array(
+                            'externalId' => 0,
+                            'name' => $data['name'],
+                            'quantity' => 1,
+                            'unitPrice' => $data['total']*100
+                        );
+                        if('yes'===$this->debug) {
+                            wc_add_notice('Shipping: '.$data['name'].', R$'.$data['total'], 'notice');
+                        }
+                    }
+                }
                 $startUrl = 'https://api.ingresse.com/shop?apikey='.$this->api_key;
                 $args = array(
                     'domain' => str_replace('https://', '', get_site_url()),
@@ -261,16 +286,17 @@ function ingresse_init_gateway_classes() {
                             'document' => isset($_POST['billing_cpf']) ? preg_replace('/[^0-9]/', '', $_POST['billing_cpf']) : preg_replace('/[^0-9]/', '', $_POST['billing_cnpj']),
                             'method' => 'creditCard',
                             'capture' => true,
-                            'softDescriptor' => 'MundoPsicodelico',
+                            'softDescriptor' => 'MPsicodelico',
                             'creditCard' => array(
                                 'installments' => 1,
                                 'number' => preg_replace('/[^0-9]/', '', $_POST['ingresse_ccNo']),
                                 'holder' => $_POST['ingresse_ccName'],
-                                'expiration' => $_POST['ingresse_expdate'],
+                                'expiration' => str_replace(' ','',$_POST['ingresse_expdate']),
                                 'cvv' => $_POST['ingresse_cvv'],
                                 'brand' => $_POST['ingresse_ccBrand']
                             ),
                             'customer' => array(
+                                'externalId' => $order->get_customer_id(),
                                 'name' => $order->get_billing_first_name().' '.$order->get_billing_last_name(),
                                 'address' => array(
                                     'street' => $order->get_billing_address_1(),
@@ -283,6 +309,8 @@ function ingresse_init_gateway_classes() {
                                 )
                             )
                         );
+
+                        wc_add_notice('payTransaction: '.json_encode($args), 'notice');
         
                         $data = wp_remote_post($payUrl, array(
                             'headers'     => array('Content-Type' => 'application/json; charset=utf-8'),
@@ -432,6 +460,19 @@ function ingresse_init_gateway_classes() {
                 $item['unitPrice'] = $data['total']*100;
                 $items[] = $item;
             }
+            $shipping_total = $order->get_shipping_total();
+            $shipping_method = $order->get_shipping_method();
+            if($shipping_total!='0.00') {
+                $items[] = array(
+                    'externalId' => 0,
+                    'name' => 'Frete: '.$shipping_method,
+                    'quantity' => 1,
+                    'unitPrice' => $shipping_total*100
+                );
+            }
+            if('yes'===$this->debug) {
+                wc_add_notice('Shipping: '.$shipping_method.', '.$shipping_total, 'notice');
+            }
             $startUrl = 'https://api.ingresse.com/shop?apikey='.$this->api_key;
             $args = array(
                 'domain' => str_replace('https://', '', get_site_url()),
@@ -469,6 +510,7 @@ function ingresse_init_gateway_classes() {
                         'document' => isset($_POST['billing_cpf']) ? preg_replace('/[^0-9]/', '', $_POST['billing_cpf']) : preg_replace('/[^0-9]/', '', $_POST['billing_cnpj']),
                         'method' => 'bankBillet',
                         'customer' => array(
+                            'externalId' => $order->get_customer_id(),
                             'name' => $order->get_billing_first_name().' '.$order->get_billing_last_name(),
                             'address' => array(
                                 'street' => $order->get_billing_address_1(),
@@ -495,6 +537,8 @@ function ingresse_init_gateway_classes() {
                         if(isset($response->responseData->bankbillet_url)) {
                             $order->set_transaction_id($transactionId);
                             $order->set_status('pending');
+                            update_post_meta($order->get_order_number(), 'bankbillet_url', $response->responseData->bankbillet_url);
+                            $order->update_meta_data('bankbillet_url', $response->responseData->bankbillet_url);
                             $order->add_order_note('Boleto da compra: <a href="'.$response->responseData->bankbillet_url.'">Clique aqui</a> ou copie e cole o seguinte link em seu navegador '.$response->responseData->bankbillet_url, true);
                             $order->reduce_order_stock(); //reduce stock here or when payment confirmed?
                             $woocommerce->cart->empty_cart();
@@ -506,7 +550,7 @@ function ingresse_init_gateway_classes() {
                         } else {
                             wc_add_notice('Houve um erro ao gerar o boleto. Entre em contato com a administração do site.');
                             if('yes'===$this->debug) {
-                                wc_add_notice('Ingresse response: '.$response);
+                                wc_add_notice('Ingresse response: '.json_encode($response));
                             }
                             return;
                         }
