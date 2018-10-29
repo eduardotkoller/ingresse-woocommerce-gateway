@@ -461,17 +461,20 @@ function ingresse_init_gateway_classes() {
                 $items[] = $item;
             }
             $shipping_total = $order->get_shipping_total();
-            $shipping_method = $order->get_shipping_method();
+            $shippings = $order->get_items('shipping');
             if($shipping_total!='0.00') {
-                $items[] = array(
-                    'externalId' => 0,
-                    'name' => 'Frete: '.$shipping_method,
-                    'quantity' => 1,
-                    'unitPrice' => $shipping_total*100
-                );
-            }
-            if('yes'===$this->debug) {
-                wc_add_notice('Shipping: '.$shipping_method.', '.$shipping_total, 'notice');
+                foreach($shippings as $shipping) {
+                    $data = $shipping->get_data();
+                    $items[] = array(
+                        'externalId' => 0,
+                        'name' => $data['name'],
+                        'quantity' => 1,
+                        'unitPrice' => $data['total']*100
+                    );
+                    if('yes'===$this->debug) {
+                        wc_add_notice('Shipping: '.$data['name'].', R$'.$data['total'], 'notice');
+                    }
+                }
             }
             $startUrl = 'https://api.ingresse.com/shop?apikey='.$this->api_key;
             $args = array(
